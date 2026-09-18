@@ -16,12 +16,22 @@
 
 ## 安装
 
-```bash
-npm i -g grabit-mcp
-grabit doctor --fix   # 首次：自动下载 yt-dlp + ffmpeg（之后不需要再跑）
+**Windows（PowerShell 一条命令）：**
+
+```powershell
+irm https://raw.githubusercontent.com/RookieApe-tao/grabit-mcp/main/setup.ps1 | iex
 ```
 
-其实不跑 `doctor --fix` 也行——第一次下载视频时会自动补齐环境。
+**macOS / Linux：**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RookieApe-tao/grabit-mcp/main/setup.sh | bash
+```
+
+脚本做的事：克隆到 `~/.grabit/app` → `npm i -g` 本地目录（dist 已预编译，无需构建）→ `grabit doctor --fix` 自动补齐 yt-dlp/ffmpeg。
+**更新版本 = 重跑同一条命令。**
+
+> npm 注册表版（`npm i -g grabit-mcp`）等账号就绪后提供；当前 GitHub 直装即全功能。
 
 从源码构建：
 
@@ -108,7 +118,7 @@ grabit config douyinApi http://127.0.0.1:8000
 
 ## 换电脑恢复（共 2 步）
 
-1. 装 Node.js 后：`npm i -g grabit-mcp`
+1. 装 Node.js + Git 后，运行上面的**一键安装命令**
 2. MCP 客户端配置里加一行（见上文）；或直接 `grabit doctor --fix`
 
 环境、配置、下载全在本机自动完成，无需迁移。
