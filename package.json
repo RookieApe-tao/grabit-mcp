@@ -25,6 +25,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
+    "prepare": "npm run build",
     "start": "node dist/cli.js",
     "smoke:mcp": "node scripts/mcp-smoke.mjs"
   },
