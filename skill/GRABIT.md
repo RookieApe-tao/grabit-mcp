@@ -35,7 +35,9 @@ description: 用本机 grabit 下载链接中的视频（YouTube、X/Twitter、T
 
 1. 用户未指定画质 → 直接最高画质下载，不要先 info 再追问一遍。
 2. 完成后必须报告**保存路径**（和文件大小）；默认输出目录 `~/Downloads/grabit`。
-3. 抖音无水印依赖 `~/.grabit/config.json` 的 `douyinApi`（自托管解析服务）；未配置时走兜底通道，如实告知可能带水印。
+3. 抖音（实测可用流程）：① 让用户在 Edge 打开一次 douyin.com 刷新登录态；② 关闭全部 Edge 窗口后执行
+   `taskkill /IM msedge.exe /F`（Edge"启动加速"会留后台进程锁 cookie 库，只关窗口不够）；③
+   `grabit "<url>" --cookies-from-browser edge`。彻底无水印需自托管 douyinApi（`grabit config douyinApi <地址>`）。
 4. YouTube/X 报网络错误 → 提示需要代理（yt-dlp 读 `HTTPS_PROXY` 环境变量）。
 5. 环境问题一律 `grabit doctor --fix`，不要手动安装 yt-dlp/ffmpeg。
 6. 仅限个人备份与授权内容；用户要求整站批量爬取时提醒版权合规。
