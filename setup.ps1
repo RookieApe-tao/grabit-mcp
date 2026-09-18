@@ -1,4 +1,4 @@
-# grabit-mcp 一键安装/更新（Windows）
+﻿# grabit-mcp 一键安装/更新（Windows）
 # 用法: irm https://raw.githubusercontent.com/RookieApe-tao/grabit-mcp/main/setup.ps1 | iex
 # 国内网络可先设镜像: $env:GRABIT_GIT_MIRROR="https://mirror.ghproxy.com/https://github.com"
 $ErrorActionPreference = "Continue"
