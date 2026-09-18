@@ -6,11 +6,12 @@ import {
   doctorText,
   mediaBatch,
   mediaDownload,
+  mediaEnhance,
   mediaInfo,
 } from "./core/api.js";
 import { loadConfig, saveConfig } from "./core/config.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.2";
 
 function fail(e: unknown) {
   return {
@@ -108,6 +109,30 @@ server.tool(
       return {
         content: [
           { type: "text", text: browser ? `✔ cookiesFromBrowser=${cfg.cookiesFromBrowser}` : "✔ 已清除登录态配置" },
+        ],
+      };
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
+server.tool(
+  "media_enhance",
+  "本地画质优化：去压缩伪影+锐化后重编码（改善平台重压缩导致的模糊/色块，不会凭空增加细节）",
+  {
+    file: z.string().describe("视频文件完整路径"),
+    preset: z.enum(["light", "strong"]).default("light").describe("light=轻优化（默认），strong=强优化"),
+  },
+  async ({ file, preset }) => {
+    try {
+      const r = await mediaEnhance(file, { preset });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `✔ ${preset === "strong" ? "强" : "轻"}优化完成（${(r.sizeBytes / 1048576).toFixed(1)} MB）\n${r.file}`,
+          },
         ],
       };
     } catch (e) {

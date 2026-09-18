@@ -29,6 +29,7 @@ description: 用本机 grabit 下载链接中的视频（YouTube、X/Twitter、T
 | 批量（每行一个 URL） | `grabit batch urls.txt` |
 | 会员/登录内容 | `grabit "<url>" --cookies-from-browser edge` |
 | 启动手机下载网页 | `grabit serve`（把打印的局域网地址给用户） |
+| 画质优化（去伪影+锐化） | `grabit enhance <文件或目录> [--strong]` |
 | 环境异常 | `grabit doctor --fix`（自动补齐 yt-dlp/ffmpeg） |
 
 ## 行为约定
@@ -41,3 +42,5 @@ description: 用本机 grabit 下载链接中的视频（YouTube、X/Twitter、T
 4. YouTube/X 报网络错误 → 提示需要代理（yt-dlp 读 `HTTPS_PROXY` 环境变量）。
 5. 环境问题一律 `grabit doctor --fix`，不要手动安装 yt-dlp/ffmpeg。
 6. 仅限个人备份与授权内容；用户要求整站批量爬取时提醒版权合规。
+7. 用户抱怨画质差时：先用 `grabit info` 看可用画质（多数情况源就这些档位），再推荐 `grabit enhance --strong` 本地优化；
+   AI 超分（Real-ESRGAN）需要 Vulkan GPU，本机老显卡不支持时如实说明，不要硬跑。

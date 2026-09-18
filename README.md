@@ -9,7 +9,8 @@
 
 - 🎯 **最高画质默认**：`bestvideo+bestaudio` 自动合并 mp4，可选 4K/1080/720/480/仅音频
 - 🪄 **环境自愈**：首次运行自动检测并下载 yt-dlp / ffmpeg 到 `~/.grabit/bin`（免管理员、不污染 PATH）
-- 🤖 **MCP Server**：5 个结构化工具，DSH / Claude Desktop 等任意 MCP 客户端可用
+- ✨ **本地画质优化**：`grabit enhance` 去压缩伪影+锐化重编码（light/strong 两档），改善平台重压缩的模糊色块
+- 🤖 **MCP Server**：6 个结构化工具，DSH / Claude Desktop 等任意 MCP 客户端可用
 - 📱 **手机网页**：`grabit serve` 一键启动，手机浏览器直接下载 + 取回电脑上已下载的文件
 - 🧩 **平台路由**：URL 自动识别平台；抖音预留无水印 API 通道
 - 📦 **换机零成本**：GitHub + npm 托管代码，新电脑两条命令完全恢复
@@ -49,6 +50,7 @@ grabit "https://x.com/user/status/123" -q 1080           # 指定画质
 grabit "https://youtu.be/xxx" -q audio                   # 仅音频 mp3
 grabit info "https://..."                                # 查标题/可用画质
 grabit batch urls.txt                                    # 批量（每行一个链接）
+grabit enhance <文件或目录> --strong                      # 本地画质优化（去伪影+锐化）
 grabit serve                                             # 启动手机网页（默认 :8787）
 grabit doctor [--fix]                                    # 环境自检/自动修复
 grabit config outputDir "D:/Videos"                      # 改输出目录
@@ -81,6 +83,22 @@ grabit "https://..." --cookies-from-browser edge
 | `media_batch` | 批量下载并汇总结果 |
 | `media_cookies` | 设置/清除浏览器登录态 |
 | `media_doctor` | 环境自检 |
+
+## 本地画质优化（enhance）
+
+平台（尤其 X）会重压缩视频导致模糊/色块。`grabit enhance` 用 ffmpeg 做本地修复：
+
+```bash
+grabit enhance video.mp4                # 轻优化：去噪(hqdn3d) + 锐化(cas)，CRF16 重编码
+grabit enhance video.mp4 --strong       # 强优化：加强去噪 + 双重锐化
+grabit enhance "D:/Downloads/grabit"    # 整个目录批量（自动跳过已优化的）
+```
+
+输出为 `原名_优化.mp4` / `原名_强优化.mp4`，源文件不动。
+预期：观感更干净锐利（尤其文字与静止画面）；**不会凭空恢复被平台压缩掉的真实细节**。
+
+AI 超分（Real-ESRGAN，逐帧处理再合成）：需要支持 Vulkan 的 GPU（近 8 年的独显/核显均可）；
+老显卡（如 Fermi 系 GTX 5xx）无 Vulkan 无法运行，CPU 纯跑速度不可接受。
 
 ## 手机端（不需要服务器）
 

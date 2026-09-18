@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { spawn } from "node:child_process";
 import { doctor as binDoctor, installBinaries, resolveFfmpeg, resolveYtDlp } from "./binaries.js";
 import { configFile, loadConfig } from "./config.js";
 import { douyinDownload } from "./douyin.js";
@@ -113,6 +114,57 @@ export async function mediaBatch(urls, o = {}, onItem) {
         }
     }
     return results;
+}
+/** 去压缩伪影 + 锐化的 ffmpeg 滤镜链（本地画质优化） */
+const ENHANCE_VF = {
+    light: "hqdn3d=1.5:1.2:6:6,cas=0.5",
+    strong: "hqdn3d=3:2:9:9,cas=0.8,unsharp=5:5:0.4",
+};
+export async function mediaEnhance(file, o = {}) {
+    const cfg = loadConfig();
+    const ffmpeg = await resolveFfmpeg(cfg);
+    if (!ffmpeg)
+        throw new Error("未找到 ffmpeg，请运行 `grabit doctor --fix`");
+    if (!fs.existsSync(file))
+        throw new Error(`文件不存在: ${file}`);
+    const preset = o.preset ?? "light";
+    const suffix = preset === "strong" ? "_强优化" : "_优化";
+    const out = file.replace(/\.(mp4|mkv|webm|mov|ts)$/i, "") + suffix + ".mp4";
+    const args = [
+        "-y",
+        "-i",
+        file,
+        "-vf",
+        ENHANCE_VF[preset],
+        "-c:v",
+        "libx264",
+        "-crf",
+        "16",
+        "-preset",
+        "fast",
+        "-c:a",
+        "copy",
+        out,
+    ];
+    await new Promise((resolve, reject) => {
+        const child = spawn(ffmpeg, args, { windowsHide: true });
+        let buf = "";
+        const consume = (d) => {
+            buf += d.toString();
+            const parts = buf.split(/\r|\n/);
+            buf = parts.pop() ?? "";
+            for (const line of parts)
+                if (line.trim())
+                    o.onLine?.(line.trim());
+        };
+        child.stdout?.on("data", consume);
+        child.stderr?.on("data", consume);
+        child.on("error", reject);
+        child.on("close", (code) => code === 0 ? resolve() : reject(new Error(`ffmpeg 退出码 ${code}（参数不兼容或文件损坏）`)));
+    });
+    if (!fs.existsSync(out))
+        throw new Error("优化输出未生成");
+    return { file: out, sizeBytes: fs.statSync(out).size, preset };
 }
 export async function doctorText() {
     const cfg = loadConfig();

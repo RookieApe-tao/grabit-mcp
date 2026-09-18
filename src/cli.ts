@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import path from "node:path";
 import { installBinaries } from "./core/binaries.js";
 import { configFile, loadConfig, saveConfig, type GrabitConfig } from "./core/config.js";
-import { doctorText, mediaBatch, mediaDownload, mediaInfo } from "./core/api.js";
+import { doctorText, mediaBatch, mediaDownload, mediaEnhance, mediaInfo } from "./core/api.js";
 import { QUALITIES } from "./core/args.js";
 import { serve } from "./http/server.js";
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 const HELP = `grabit v${VERSION} — 全平台高清视频下载（CLI + MCP + 手机网页）
 
 用法:
   grabit <url>                        下载视频（默认最高画质，自动合并音轨）
   grabit info <url>                   查看标题/时长/可用画质
+  grabit enhance <文件|目录> [--strong]  本地画质优化（去压缩伪影+锐化；--strong 更强）
   grabit batch <file>                 批量下载（每行一个 URL，# 开头为注释）
   grabit serve [--port 8787] [--host 0.0.0.0]
                                       启动手机网页（同局域网/Tailscale 访问）
@@ -124,6 +126,54 @@ async function main(): Promise<number> {
       const okCount = results.filter((r) => r.ok).length;
       console.log(`\n完成: ${okCount}/${results.length} 成功`);
       return okCount === results.length ? 0 : 1;
+    }
+
+    case "enhance": {
+      const target = rest.find((a) => !a.startsWith("-"));
+      if (!target) {
+        console.error("用法: grabit enhance <文件或目录> [--strong]");
+        return 1;
+      }
+      if (!fs.existsSync(target)) {
+        console.error(`✖ 路径不存在: ${target}`);
+        return 1;
+      }
+      const preset = flag("--strong") ? ("strong" as const) : ("light" as const);
+      const st = fs.statSync(target);
+      const files = st.isDirectory()
+        ? fs
+            .readdirSync(target)
+            .filter((n) => /\.(mp4|mkv|webm|mov)$/i.test(n) && !/(优化|强优化)\.mp4$/i.test(n))
+            .map((n) => path.join(target, n))
+        : [target];
+      if (!files.length) {
+        console.error("✖ 目录里没有可优化的视频（mp4/mkv/webm/mov）");
+        return 1;
+      }
+      console.log(`共 ${files.length} 个视频，档位: ${preset === "strong" ? "强优化" : "轻优化"}`);
+      let failCount = 0;
+      for (let i = 0; i < files.length; i++) {
+        const label = path.basename(files[i]);
+        process.stdout.write(`[${i + 1}/${files.length}] ${label} ... `);
+        try {
+          const r = await mediaEnhance(files[i], {
+            preset,
+            onLine: (l) => {
+              if (/^frame=/.test(l)) {
+                process.stdout.write(`\r[${i + 1}/${files.length}] ${l.slice(0, 110).padEnd(110)}`);
+              }
+            },
+          });
+          process.stdout.write("\n");
+          console.log(`   ✔ ${(r.sizeBytes / 1048576).toFixed(1)} MB → ${path.basename(r.file)}`);
+        } catch (e) {
+          process.stdout.write("\n");
+          console.log(`   ✖ ${e instanceof Error ? e.message : String(e)}`);
+          failCount++;
+        }
+      }
+      console.log(failCount ? `\n完成（${failCount} 个失败）` : "\n全部完成 ✔");
+      return failCount ? 1 : 0;
     }
 
     case "doctor": {
