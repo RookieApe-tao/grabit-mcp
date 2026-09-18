@@ -4,7 +4,7 @@ import { configFile, loadConfig, type GrabitConfig } from "./config.js";
 import { douyinDownload } from "./douyin.js";
 import { detectPlatform, PLATFORM_LABEL } from "./router.js";
 import { normalizeQuality, type Quality } from "./args.js";
-import { extractFinalPath, newestFileSince, ytdlpDownload, ytdlpInfo, type MediaInfo } from "./ytdlp.js";
+import { extractFinalPath, newestFileSince, ytdlpDownload, ytdlpInfo, type DownloadOutcome, type MediaInfo } from "./ytdlp.js";
 
 export { detectPlatform, PLATFORM_LABEL } from "./router.js";
 export type { Platform } from "./router.js";
@@ -58,6 +58,20 @@ export async function mediaInfo(url: string): Promise<MediaInfo & { platformLabe
   return { ...info, platformLabel: detectPlatform(url) };
 }
 
+/** 把 yt-dlp 的原始报错翻译成可操作提示 */
+function humanizeYtDlpError(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/fresh cookies/i.test(msg)) {
+    return new Error(
+      "该平台需要浏览器登录态：先在 Edge 里打开一次目标站点（如 douyin.com），然后重试并加 --cookies-from-browser edge（重试前必须完全关闭 Edge）",
+    );
+  }
+  if (/could not copy .* cookie database/i.test(msg)) {
+    return new Error("浏览器正在运行，cookie 库被锁定：请完全关闭 Edge/Chrome（所有窗口）后重试");
+  }
+  return err instanceof Error ? err : new Error(msg);
+}
+
 export async function mediaDownload(url: string, o: DownloadOptions = {}): Promise<DownloadResult> {
   const cfg = loadConfig();
   const { ytdlp } = await requireBins(cfg, true);
@@ -80,18 +94,23 @@ export async function mediaDownload(url: string, o: DownloadOptions = {}): Promi
   }
 
   const startedAt = Date.now() - 3000;
-  const result = await ytdlpDownload(
-    ytdlp,
-    url,
-    {
-      quality,
-      outputDir,
-      playlist: o.playlist ?? false,
-      cookiesFromBrowser: o.cookiesFromBrowser ?? cfg.cookiesFromBrowser,
-      cookiesFile: o.cookiesFile ?? cfg.cookiesFile,
-    },
-    o.onLine,
-  );
+  let result: DownloadOutcome;
+  try {
+    result = await ytdlpDownload(
+      ytdlp,
+      url,
+      {
+        quality,
+        outputDir,
+        playlist: o.playlist ?? false,
+        cookiesFromBrowser: o.cookiesFromBrowser ?? cfg.cookiesFromBrowser,
+        cookiesFile: o.cookiesFile ?? cfg.cookiesFile,
+      },
+      o.onLine,
+    );
+  } catch (err) {
+    throw humanizeYtDlpError(err);
+  }
   // print 路径可能乱码（PyInstaller 编码问题）：有效就用，否则扫描输出目录取最新成品
   const printed = result.file;
   const file =
