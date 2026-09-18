@@ -121,6 +121,8 @@ grabit config douyinApi http://127.0.0.1:8000
 1. 装 Node.js + Git 后，运行上面的**一键安装命令**
 2. MCP 客户端配置里加一行（见上文）；或直接 `grabit doctor --fix`
 
+可选：把 `skill/GRABIT.md` 复制为 `~/.dsh/skills/grabit/SKILL.md`，让 Agent 一句话触发下载。
+
 环境、配置、下载全在本机自动完成，无需迁移。
 
 ## 开发
