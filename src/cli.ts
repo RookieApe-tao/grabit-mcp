@@ -6,7 +6,7 @@ import { doctorText, mediaBatch, mediaDownload, mediaInfo } from "./core/api.js"
 import { QUALITIES } from "./core/args.js";
 import { serve } from "./http/server.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 const HELP = `grabit v${VERSION} — 全平台高清视频下载（CLI + MCP + 手机网页）
 
