@@ -116,12 +116,45 @@ grabit config douyinApi http://127.0.0.1:8000
 | `cookiesFile` | Netscape cookie 文件 |
 | `douyinApi` | 抖音无水印解析 API 地址 |
 
-## 换电脑恢复（共 2 步）
+## DSH 集成（MCP + Skill，换机三步）
 
-1. 装 Node.js + Git 后，运行上面的**一键安装命令**
-2. MCP 客户端配置里加一行（见上文）；或直接 `grabit doctor --fix`
+### 第 1 步：安装工具本体
+运行上面的一键安装命令（`setup.ps1` / `setup.sh`）。
 
-可选：把 `skill/GRABIT.md` 复制为 `~/.dsh/skills/grabit/SKILL.md`，让 Agent 一句话触发下载。
+### 第 2 步：挂 MCP —— 编辑 `~/.dsh/profiles/web/cordis.patch.yml`，追加：
+
+```yaml
+# grabit MCP — 全平台视频下载 (YouTube/X/Telegram/抖音/B站/TikTok/小红书)
+# Tools register as mcp__grabit__* (media_info / media_download / media_batch /
+# media_cookies / media_doctor).
+- insert:
+    - id: mcp-grabit
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: grabit
+        transport: stdio
+        command: node
+        args:
+          - C:/Users/<你>/AppData/Roaming/npm/node_modules/grabit-mcp/dist/mcp-server.js
+```
+
+> - `args` 里的路径换成自己的 npm 全局目录（`npm root -g` 查看；macOS/Linux 一般是 `/usr/local/lib/node_modules/...` 或 `~/.npm-global/lib/node_modules/...`）
+> - DSH 要求 `command` 为绝对路径，所以用 `node` + js 绝对路径的方式
+> - 验证：`dsh --profile web --dump-config | grep mcp-grabit`；**重启 dsh web 后**工具生效
+
+### 第 3 步：装 Skill
+
+```powershell
+# Windows（macOS/Linux 路径为 ~/.dsh/skills/grabit/SKILL.md）
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.dsh\skills\grabit" | Out-Null
+Copy-Item "<仓库目录>\skill\GRABIT.md" "$env:USERPROFILE\.dsh\skills\grabit\SKILL.md"
+```
+
+保存后即时生效（无需重启）。之后对 Agent 说"下载这个视频链接"就会直接触发。
+
+## 换电脑恢复 = 上面的三步
+
+**① 一键安装命令**（工具本体 + 环境自愈） → **② cordis.patch 挂 MCP**（重启 dsh web 生效） → **③ 拷 Skill**（即时生效）。
 
 环境、配置、下载全在本机自动完成，无需迁移。
 
