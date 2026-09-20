@@ -73,6 +73,7 @@ footer{font-size:12px;color:#5b6b8c;text-align:center;margin-top:18px;line-heigh
   <div id="meta" class="meta"></div>
   <div id="err" class="err"></div>
   <div id="log" hidden></div>
+  <div class="meta" style="margin-top:10px"><label><input type="checkbox" id="remix" checked style="vertical-align:-2px"> 下载后自动混剪优化（镜像/抽帧/变速/噪点/每10秒随机删帧，只留成品）</label></div>
 </div>
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -103,7 +104,8 @@ async function startDl(){
   document.getElementById("err").textContent="";
   try{
     const q=document.getElementById("q").value;
-    const r=await fetch("/api/download?url="+encodeURIComponent(url)+"&quality="+q);
+    const rm=document.getElementById("remix").checked?"1":"0";
+    const r=await fetch("/api/download?url="+encodeURIComponent(url)+"&quality="+q+"&remix="+rm);
     const j=await r.json();
     if(j.error){log.hidden=true;document.getElementById("err").textContent=j.error;btn.disabled=false;return}
     pollTimer=setInterval(()=>poll(j.jobId,btn),1000);
@@ -151,20 +153,29 @@ const MIME: Record<string, string> = {
   ".png": "image/png",
 };
 
-function startJob(url: string, quality: string | undefined): string {
+function startJob(url: string, quality: string | undefined, remix: string | null): string {
   const id = Math.random().toString(36).slice(2, 10);
   const job: Job = { id, status: "running", lines: [] };
   jobs.set(id, job);
   mediaDownload(url, {
     quality: quality && (QUALITIES as string[]).includes(quality) ? quality : undefined,
+    remix: remix === "1" ? true : remix === "0" ? false : undefined,
+    onStage: (stage) => {
+      if (stage === "remix-start") job.lines.push("🎨 混剪优化中（镜像/抽帧/变速/噪点/随机删帧）…");
+      else if (stage === "remix-done") job.lines.push("✔ 混剪完成，原片已删除，只留成品");
+      else if (stage === "remix-failed") job.lines.push("⚠ 混剪失败，已保留原片");
+    },
     onLine: (line) => {
-      job.lines.push(line);
-      if (job.lines.length > 300) job.lines.shift();
+      if (/^frame=/.test(line)) {
+        job.lines.push(line);
+        if (job.lines.length > 300) job.lines.shift();
+      }
     },
   })
     .then((r) => {
       job.status = "done";
       job.file = r.file || undefined;
+      if (r.remixError) job.lines.push("⚠ " + r.remixError);
     })
     .catch((e: unknown) => {
       job.status = "error";
@@ -208,7 +219,9 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   if (p === "/api/download") {
     const url = u.searchParams.get("url");
     if (!url) return send(res, 400, { error: "缺少 url 参数" });
-    return send(res, 200, { jobId: startJob(url, u.searchParams.get("quality") ?? undefined) });
+    return send(res, 200, {
+      jobId: startJob(url, u.searchParams.get("quality") ?? undefined, u.searchParams.get("remix")),
+    });
   }
 
   if (p === "/api/job") {

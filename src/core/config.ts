@@ -11,6 +11,10 @@ export type GrabitConfig = {
   ytDlpPath?: string;
   /** 显式指定 ffmpeg 可执行文件路径（可选） */
   ffmpegPath?: string;
+  /** 显式指定 ffprobe 可执行文件路径（可选，混剪探测用；缺省自动在 ffmpeg 同目录寻找） */
+  ffprobePath?: string;
+  /** 下载完成后自动混剪+优化并删除原片，只留成品（默认 true；可用 --no-remix 单次关闭） */
+  autoRemix: boolean;
   /** 从浏览器读取登录态：edge / chrome / firefox / brave ...（可选） */
   cookiesFromBrowser?: string;
   /** Netscape cookie 文件路径（可选，优先级低于 cookiesFromBrowser） */
@@ -31,6 +35,7 @@ export function defaultConfig(): GrabitConfig {
   return {
     binDir: path.join(grabitHome(), "bin"),
     outputDir: path.join(os.homedir(), "Downloads", "grabit"),
+    autoRemix: true,
   };
 }
 

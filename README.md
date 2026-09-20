@@ -8,9 +8,10 @@
 ## 特性
 
 - 🎯 **最高画质默认**：`bestvideo+bestaudio` 自动合并 mp4，可选 4K/1080/720/480/仅音频
+- 🎞️ **下载即混剪**：下载完成自动做去重混剪（镜像/抽帧/变速/噪点/每10秒随机删1~3帧）+ 画质优化，一次编码，**只留成品、自动删原片**
 - 🪄 **环境自愈**：首次运行自动检测并下载 yt-dlp / ffmpeg 到 `~/.grabit/bin`（免管理员、不污染 PATH）
 - ✨ **本地画质优化**：`grabit enhance` 去压缩伪影+锐化重编码（light/strong 两档），改善平台重压缩的模糊色块
-- 🤖 **MCP Server**：6 个结构化工具，DSH / Claude Desktop 等任意 MCP 客户端可用
+- 🤖 **MCP Server**：7 个结构化工具，DSH / Claude Desktop 等任意 MCP 客户端可用
 - 📱 **手机网页**：`grabit serve` 一键启动，手机浏览器直接下载 + 取回电脑上已下载的文件
 - 🧩 **平台路由**：URL 自动识别平台；抖音预留无水印 API 通道
 - 📦 **换机零成本**：GitHub + npm 托管代码，新电脑两条命令完全恢复
@@ -45,15 +46,18 @@ node dist/cli.js --help
 ## CLI 用法
 
 ```bash
-grabit "https://www.bilibili.com/video/BV..."            # 最高画质
+grabit "https://www.bilibili.com/video/BV..."            # 最高画质，完成后自动混剪优化（只留成品）
 grabit "https://x.com/user/status/123" -q 1080           # 指定画质
-grabit "https://youtu.be/xxx" -q audio                   # 仅音频 mp3
+grabit "https://youtu.be/xxx" -q audio                   # 仅音频 mp3（音频不做混剪）
+grabit "https://..." --no-remix                          # 只要原片，不混剪
 grabit info "https://..."                                # 查标题/可用画质
-grabit batch urls.txt                                    # 批量（每行一个链接）
+grabit batch urls.txt                                    # 批量（每行一个链接，同样自动混剪）
+grabit remix <文件或目录> [选项]                          # 对本地视频单独混剪
 grabit enhance <文件或目录> --strong                      # 本地画质优化（去伪影+锐化）
 grabit serve                                             # 启动手机网页（默认 :8787）
 grabit doctor [--fix]                                    # 环境自检/自动修复
 grabit config outputDir "D:/Videos"                      # 改输出目录
+grabit config autoRemix false                            # 关闭下载后自动混剪
 ```
 
 会员/登录内容（如 B 站大会员画质）：
@@ -79,10 +83,37 @@ grabit "https://..." --cookies-from-browser edge
 | 工具 | 说明 |
 |---|---|
 | `media_info` | 查询标题/时长/UP主/可用画质/平台 |
-| `media_download` | 下载（quality/audio、输出目录、cookies 等参数） |
+| `media_download` | 下载（默认完成后自动混剪优化；`remix=false` 关闭） |
 | `media_batch` | 批量下载并汇总结果 |
+| `media_remix` | 对本地视频做混剪去重（镜像/抽帧/变速/噪点/随机删帧等参数可调） |
 | `media_cookies` | 设置/清除浏览器登录态 |
 | `media_doctor` | 环境自检 |
+
+## 下载后自动混剪（去重）
+
+下载完成会自动对视频做「混剪 + 优化」并**删除原片，只留成品**（`原名_混剪优化.mp4`）：
+
+| 动作 | 默认 | 说明 |
+|---|---|---|
+| 镜像 | 开 | 水平翻转 |
+| 抽帧 | 自动 | 源高于 30fps 时降到 30；`--fps` 可指定 |
+| 变速 | 随机 0.97~1.06x | 幅度小到无感；`--speed` 可固定 |
+| 加噪点 | 强度 6 | 轻度时域噪点；`--noise 0` 关闭 |
+| 随机删帧 | 每 10 秒删 1~3 帧 | 音画同步切除；`--window/--min/--max` 可调 |
+| 画质优化 | 开 | 去压缩伪影+锐化（同 enhance 轻档），与混剪合并为一次编码 |
+
+- 全部动作在**一次 ffmpeg 编码**里完成，没有中间文件；混剪失败会保留原片并在输出里说明原因
+- 随机参数可用 `--seed` 复现；输出帧率/删帧数实测后写进结果（JSON 里 `remixed` / `applied`）
+- 单次关闭：`grabit <url> --no-remix`；永久关闭：`grabit config autoRemix false`
+- 对已下载的本地视频补做：`grabit remix <文件或目录>`（默认保留源文件，`--delete` 才删）
+
+```bash
+grabit remix video.mp4                       # 全默认（镜像+自动抽帧+随机变速+噪点6+每10s删1~3帧+优化）
+grabit remix "D:/Downloads/grabit"           # 整个目录批量（自动跳过已是成品的）
+grabit remix video.mp4 --speed 1.05 --noise 8 --fps 30 --seed 42
+grabit remix video.mp4 --no-mirror --no-enhance --window 15 --min 2 --max 3
+```
+
 
 ## 本地画质优化（enhance）
 
@@ -129,7 +160,8 @@ grabit config douyinApi http://127.0.0.1:8000
 |---|---|
 | `outputDir` | 下载输出目录（默认 `~/Downloads/grabit`） |
 | `binDir` | yt-dlp/ffmpeg 存放目录（默认 `~/.grabit/bin`） |
-| `ytDlpPath` / `ffmpegPath` | 显式指定已有二进制路径 |
+| `ytDlpPath` / `ffmpegPath` / `ffprobePath` | 显式指定已有二进制路径 |
+| `autoRemix` | 下载后自动混剪+优化（默认 `true`） |
 | `cookiesFromBrowser` | edge / chrome / firefox ... |
 | `cookiesFile` | Netscape cookie 文件 |
 | `douyinApi` | 抖音无水印解析 API 地址 |

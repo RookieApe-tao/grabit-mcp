@@ -35,6 +35,19 @@ export async function resolveFfmpeg(cfg: GrabitConfig): Promise<string | null> {
   return which("ffmpeg");
 }
 
+export async function resolveFfprobe(cfg: GrabitConfig): Promise<string | null> {
+  if (cfg.ffprobePath && fs.existsSync(cfg.ffprobePath)) return cfg.ffprobePath;
+  const local = localBin(cfg, "ffprobe");
+  if (fs.existsSync(local)) return local;
+  // ffprobe 通常和 ffmpeg 装在同一目录
+  const ffmpeg = await resolveFfmpeg(cfg);
+  if (ffmpeg) {
+    const sibling = path.join(path.dirname(ffmpeg), process.platform === "win32" ? "ffprobe.exe" : "ffprobe");
+    if (fs.existsSync(sibling)) return sibling;
+  }
+  return which("ffprobe");
+}
+
 export async function versionOf(bin: string, args: string[] = ["--version"]): Promise<string> {
   try {
     const { stdout } = await runp(bin, args, { timeout: 20_000 });

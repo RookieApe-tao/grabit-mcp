@@ -1,10 +1,12 @@
 import fs from "node:fs";
+import path from "node:path";
 import { spawn } from "node:child_process";
 import { doctor as binDoctor, installBinaries, resolveFfmpeg, resolveYtDlp } from "./binaries.js";
 import { configFile, loadConfig, type GrabitConfig } from "./config.js";
 import { douyinDownload } from "./douyin.js";
 import { detectPlatform, PLATFORM_LABEL } from "./router.js";
 import { normalizeQuality, type Quality } from "./args.js";
+import { mediaRemix, type RemixOptions, type RemixResult } from "./remix.js";
 import { extractFinalPath, newestFileSince, ytdlpDownload, ytdlpInfo, type DownloadOutcome, type MediaInfo } from "./ytdlp.js";
 
 export { detectPlatform, PLATFORM_LABEL } from "./router.js";
@@ -12,6 +14,8 @@ export type { Platform } from "./router.js";
 export { doctor } from "./binaries.js";
 export type { DoctorReport } from "./binaries.js";
 export type { MediaInfo } from "./ytdlp.js";
+export type { RemixOptions, RemixResult, RemixApplied } from "./remix.js";
+export { mediaRemix, isRemixOutput } from "./remix.js";
 export { configFile } from "./config.js";
 
 export type DownloadOptions = {
@@ -20,6 +24,12 @@ export type DownloadOptions = {
   playlist?: boolean;
   cookiesFromBrowser?: string;
   cookiesFile?: string;
+  /** 下载后自动混剪+优化并删源（默认取配置 autoRemix，缺省 true）；audio 画质不适用 */
+  remix?: boolean;
+  /** 透传给混剪的细粒度选项（镜像/变速/噪点/抽帧/删帧窗口/种子等） */
+  remixOptions?: RemixOptions;
+  /** 阶段回调：download → remix-probe → remix-encode → remix-done / remix-failed */
+  onStage?: (stage: string, file?: string) => void;
   onLine?: (line: string) => void;
 };
 
@@ -27,9 +37,16 @@ export type DownloadResult = {
   platform: string;
   platformLabel: string;
   quality: Quality;
+  /** 最终成品路径（开了混剪时=混剪成品；否则=原始下载） */
   file: string;
   sizeBytes: number;
   engine: "yt-dlp" | "douyin-api";
+  /** 是否已自动混剪 */
+  remixed?: boolean;
+  /** 混剪失败时的原因（此时保留原始下载文件） */
+  remixError?: string;
+  /** 混剪成功后被删除的原始文件名（仅供记录，文件已不存在） */
+  sourceFile?: string;
 };
 
 /** 确保依赖就绪；缺失时自动下载安装（自引导），失败才抛错 */
@@ -59,6 +76,41 @@ export async function mediaInfo(url: string): Promise<MediaInfo & { platformLabe
   return { ...info, platformLabel: detectPlatform(url) };
 }
 
+/** 下载收尾：按开关对成品做「混剪+优化」一次编码，成功即删源，只留最终文件 */
+async function finalizeDownload(
+  base: Omit<DownloadResult, "file" | "sizeBytes">,
+  file: string,
+  o: DownloadOptions,
+  cfg: GrabitConfig,
+): Promise<DownloadResult> {
+  let sizeBytes = fs.existsSync(file) ? fs.statSync(file).size : 0;
+  const wantRemix = (o.remix ?? cfg.autoRemix ?? true) && base.quality !== "audio" && !!file && fs.existsSync(file);
+  if (!wantRemix) return { ...base, file, sizeBytes };
+
+  o.onStage?.("remix-start", file);
+  try {
+    const r: RemixResult = await mediaRemix(file, {
+      deleteSource: true,
+      onLine: o.onLine,
+      onStage: (s) => o.onStage?.(`remix-${s}`, file),
+      ...o.remixOptions,
+    });
+    o.onStage?.("remix-done", r.file);
+    return {
+      ...base,
+      file: r.file,
+      sizeBytes: r.sizeBytes,
+      remixed: true,
+      sourceFile: path.basename(file),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    o.onStage?.("remix-failed", file);
+    // 混剪失败不吞掉下载成果：保留原片，把原因带回给调用方
+    return { ...base, file, sizeBytes, remixed: false, remixError: msg };
+  }
+}
+
 /** 把 yt-dlp 的原始报错翻译成可操作提示 */
 function humanizeYtDlpError(err: unknown): Error {
   const msg = err instanceof Error ? err.message : String(err);
@@ -84,14 +136,12 @@ export async function mediaDownload(url: string, o: DownloadOptions = {}): Promi
   // 抖音：优先走无水印 API
   if (platform === "douyin" && cfg.douyinApi) {
     const file = await douyinDownload(cfg.douyinApi, url, outputDir, o.onLine);
-    return {
-      platform,
-      platformLabel: PLATFORM_LABEL[platform],
-      quality,
+    return finalizeDownload(
+      { platform, platformLabel: PLATFORM_LABEL[platform], quality, engine: "douyin-api" },
       file,
-      sizeBytes: fs.existsSync(file) ? fs.statSync(file).size : 0,
-      engine: "douyin-api",
-    };
+      o,
+      cfg,
+    );
   }
 
   const startedAt = Date.now() - 3000;
@@ -116,16 +166,12 @@ export async function mediaDownload(url: string, o: DownloadOptions = {}): Promi
   const printed = result.file;
   const file =
     printed && fs.existsSync(printed) ? printed : (newestFileSince(outputDir, startedAt) ?? "");
-  let sizeBytes = 0;
-  if (file && fs.existsSync(file)) sizeBytes = fs.statSync(file).size;
-  return {
-    platform,
-    platformLabel: PLATFORM_LABEL[platform],
-    quality,
+  return finalizeDownload(
+    { platform, platformLabel: PLATFORM_LABEL[platform], quality, engine: "yt-dlp" },
     file,
-    sizeBytes,
-    engine: "yt-dlp",
-  };
+    o,
+    cfg,
+  );
 }
 
 export type BatchItem = { url: string; ok: boolean; file?: string; error?: string };

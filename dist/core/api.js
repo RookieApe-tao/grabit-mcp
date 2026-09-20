@@ -1,13 +1,16 @@
 import fs from "node:fs";
+import path from "node:path";
 import { spawn } from "node:child_process";
 import { doctor as binDoctor, installBinaries, resolveFfmpeg, resolveYtDlp } from "./binaries.js";
 import { configFile, loadConfig } from "./config.js";
 import { douyinDownload } from "./douyin.js";
 import { detectPlatform, PLATFORM_LABEL } from "./router.js";
 import { normalizeQuality } from "./args.js";
+import { mediaRemix } from "./remix.js";
 import { newestFileSince, ytdlpDownload, ytdlpInfo } from "./ytdlp.js";
 export { detectPlatform, PLATFORM_LABEL } from "./router.js";
 export { doctor } from "./binaries.js";
+export { mediaRemix, isRemixOutput } from "./remix.js";
 export { configFile } from "./config.js";
 /** 确保依赖就绪；缺失时自动下载安装（自引导），失败才抛错 */
 async function requireBins(cfg, needFfmpeg) {
@@ -33,6 +36,36 @@ export async function mediaInfo(url) {
     });
     return { ...info, platformLabel: detectPlatform(url) };
 }
+/** 下载收尾：按开关对成品做「混剪+优化」一次编码，成功即删源，只留最终文件 */
+async function finalizeDownload(base, file, o, cfg) {
+    let sizeBytes = fs.existsSync(file) ? fs.statSync(file).size : 0;
+    const wantRemix = (o.remix ?? cfg.autoRemix ?? true) && base.quality !== "audio" && !!file && fs.existsSync(file);
+    if (!wantRemix)
+        return { ...base, file, sizeBytes };
+    o.onStage?.("remix-start", file);
+    try {
+        const r = await mediaRemix(file, {
+            deleteSource: true,
+            onLine: o.onLine,
+            onStage: (s) => o.onStage?.(`remix-${s}`, file),
+            ...o.remixOptions,
+        });
+        o.onStage?.("remix-done", r.file);
+        return {
+            ...base,
+            file: r.file,
+            sizeBytes: r.sizeBytes,
+            remixed: true,
+            sourceFile: path.basename(file),
+        };
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        o.onStage?.("remix-failed", file);
+        // 混剪失败不吞掉下载成果：保留原片，把原因带回给调用方
+        return { ...base, file, sizeBytes, remixed: false, remixError: msg };
+    }
+}
 /** 把 yt-dlp 的原始报错翻译成可操作提示 */
 function humanizeYtDlpError(err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -54,14 +87,7 @@ export async function mediaDownload(url, o = {}) {
     // 抖音：优先走无水印 API
     if (platform === "douyin" && cfg.douyinApi) {
         const file = await douyinDownload(cfg.douyinApi, url, outputDir, o.onLine);
-        return {
-            platform,
-            platformLabel: PLATFORM_LABEL[platform],
-            quality,
-            file,
-            sizeBytes: fs.existsSync(file) ? fs.statSync(file).size : 0,
-            engine: "douyin-api",
-        };
+        return finalizeDownload({ platform, platformLabel: PLATFORM_LABEL[platform], quality, engine: "douyin-api" }, file, o, cfg);
     }
     const startedAt = Date.now() - 3000;
     let result;
@@ -80,17 +106,7 @@ export async function mediaDownload(url, o = {}) {
     // print 路径可能乱码（PyInstaller 编码问题）：有效就用，否则扫描输出目录取最新成品
     const printed = result.file;
     const file = printed && fs.existsSync(printed) ? printed : (newestFileSince(outputDir, startedAt) ?? "");
-    let sizeBytes = 0;
-    if (file && fs.existsSync(file))
-        sizeBytes = fs.statSync(file).size;
-    return {
-        platform,
-        platformLabel: PLATFORM_LABEL[platform],
-        quality,
-        file,
-        sizeBytes,
-        engine: "yt-dlp",
-    };
+    return finalizeDownload({ platform, platformLabel: PLATFORM_LABEL[platform], quality, engine: "yt-dlp" }, file, o, cfg);
 }
 export async function mediaBatch(urls, o = {}, onItem) {
     const results = [];

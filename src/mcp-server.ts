@@ -8,10 +8,12 @@ import {
   mediaDownload,
   mediaEnhance,
   mediaInfo,
+  mediaRemix,
+  type RemixOptions,
 } from "./core/api.js";
 import { loadConfig, saveConfig } from "./core/config.js";
 
-const VERSION = "0.1.2";
+const VERSION = "0.2.0";
 
 function fail(e: unknown) {
   return {
@@ -38,7 +40,7 @@ server.tool(
 
 server.tool(
   "media_download",
-  "下载视频/音频到本机（默认最高画质、ffmpeg 合并、无转码）。换电脑首次使用会自动下载 yt-dlp/ffmpeg",
+  "下载视频/音频到本机（默认最高画质、ffmpeg 合并）。视频默认下载后自动「混剪+画质优化」并删除原片只留成品（镜像/抽帧/变速/噪点/每10秒随机删帧），remix=false 可关闭",
   {
     url: z.string().describe("视频页面链接"),
     quality: z
@@ -51,17 +53,26 @@ server.tool(
       .string()
       .optional()
       .describe("浏览器登录态 edge/chrome/firefox，用于大会员画质或登录内容"),
+    remix: z
+      .boolean()
+      .default(true)
+      .describe("下载后自动混剪+优化（删原片只留成品）；audio 画质不适用"),
   },
-  async ({ url, quality, outputDir, playlist, cookiesFromBrowser }) => {
+  async ({ url, quality, outputDir, playlist, cookiesFromBrowser, remix }) => {
     try {
-      const r = await mediaDownload(url, { quality, outputDir, playlist, cookiesFromBrowser });
+      const r = await mediaDownload(url, { quality, outputDir, playlist, cookiesFromBrowser, remix });
       const size = r.sizeBytes ? `（${(r.sizeBytes / 1048576).toFixed(1)} MB）` : "";
       const tag = r.engine === "douyin-api" ? "·无水印" : "";
+      const remixNote = r.remixed
+        ? "\n🎨 已自动混剪+优化（镜像/抽帧/变速/噪点/随机删帧），原片已删除"
+        : r.remixError
+          ? `\n⚠ 自动混剪失败（保留原片）: ${r.remixError}`
+          : "";
       return {
         content: [
           {
             type: "text",
-            text: `✔ 下载完成 [${r.platformLabel}${tag} ${r.quality}]${size}\n${r.file || "(未获取到路径)"}`,
+            text: `✔ 下载完成 [${r.platformLabel}${tag} ${r.quality}]${size}${remixNote}\n${r.file || "(未获取到路径)"}`,
           },
         ],
       };
@@ -132,6 +143,51 @@ server.tool(
           {
             type: "text",
             text: `✔ ${preset === "strong" ? "强" : "轻"}优化完成（${(r.sizeBytes / 1048576).toFixed(1)} MB）\n${r.file}`,
+          },
+        ],
+      };
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
+server.tool(
+  "media_remix",
+  "本地混剪去重：对已有视频做镜像/抽帧/变速/加噪点/每10秒随机删1~3帧，并顺带轻画质优化，一次编码输出 _混剪优化.mp4（默认保留源文件）",
+  {
+    file: z.string().describe("视频文件完整路径"),
+    mirror: z.boolean().default(true).describe("水平镜像"),
+    speed: z
+      .union([z.number(), z.literal("auto"), z.literal("off")])
+      .default("auto")
+      .describe("变速倍率；auto=随机0.97~1.06；off=不变速"),
+    noise: z.number().min(0).max(60).default(6).describe("噪点强度，0=关闭"),
+    fps: z
+      .union([z.number(), z.literal("auto"), z.literal("off")])
+      .default("auto")
+      .describe("抽帧到目标帧率；auto=源>30时降到30；off=保持"),
+    dropWindow: z.number().min(2).max(60).default(10).describe("删帧窗口秒数"),
+    dropMin: z.number().min(0).max(9).default(1).describe("每窗口最少删帧数"),
+    dropMax: z.number().min(0).max(9).default(3).describe("每窗口最多删帧数"),
+    seed: z.number().optional().describe("随机种子（可复现）"),
+    enhance: z.boolean().default(true).describe("顺带轻画质优化（去伪影+锐化）"),
+    deleteSource: z.boolean().default(false).describe("成功后删除源文件"),
+  },
+  async ({ file, mirror, speed, noise, fps, dropWindow, dropMin, dropMax, seed, enhance, deleteSource }) => {
+    try {
+      const o: RemixOptions = { mirror, speed, noise, fps, dropWindow, dropMin, dropMax, seed, enhance, deleteSource };
+      const r = await mediaRemix(file, o);
+      const a = r.applied;
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `✔ 混剪完成（${(r.sizeBytes / 1048576).toFixed(1)} MB）\n${r.file}\n` +
+              `镜像:${a.mirror ? "开" : "关"} · 变速:${a.speed}x · 噪点:${a.noise} · ` +
+              `删帧:${a.droppedFrames}帧/${a.windows}窗${a.fps ? ` · ${a.fps}fps` : ""} · ` +
+              `优化:${a.enhance ? "开" : "关"} · seed:${a.seed}${r.sourceDeleted ? "\n源文件已删除" : ""}`,
           },
         ],
       };

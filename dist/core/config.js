@@ -11,6 +11,7 @@ export function defaultConfig() {
     return {
         binDir: path.join(grabitHome(), "bin"),
         outputDir: path.join(os.homedir(), "Downloads", "grabit"),
+        autoRemix: true,
     };
 }
 export function loadConfig() {
