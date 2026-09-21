@@ -8,14 +8,14 @@ import { isRemixOutput } from "./core/remix.js";
 import { QUALITIES } from "./core/args.js";
 import { serve } from "./http/server.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 const HELP = `grabit v${VERSION} — 全平台高清视频下载（CLI + MCP + 手机网页）
 
 用法:
   grabit <url>                        下载视频（默认最高画质；完成后自动混剪优化，只留成品）
   grabit info <url>                   查看标题/时长/可用画质
-  grabit remix <文件|目录> [选项]      本地混剪：镜像/抽帧/变速/噪点/每10秒随机删1~3帧+画质优化
+  grabit remix <文件|目录> [选项]      本地混剪：智能镜像/抽帧/变速/噪点/每10秒随机删1~3帧+画质优化
   grabit enhance <文件|目录> [--strong]  本地画质优化（去压缩伪影+锐化；--strong 更强）
   grabit batch <file>                 批量下载（每行一个 URL，# 开头为注释）
   grabit serve [--port 8787] [--host 0.0.0.0]
@@ -34,6 +34,9 @@ const HELP = `grabit v${VERSION} — 全平台高清视频下载（CLI + MCP + �
 
 混剪选项（remix 子命令，均可省略用默认）:
       --no-mirror          关闭镜像
+      --no-ocr             关闭智能镜像的文字检测（始终镜像，不检测）
+      --zoom-min <n>       检测到文字时随机裁剪放大下限（默认 1.02）
+      --zoom-max <n>       检测到文字时随机裁剪放大上限（默认 1.08，最大 1.5）
       --speed <n|off>      变速倍率，如 1.05；省略=随机 0.97~1.06；off=不变速
       --noise <n>          噪点强度 0~60（默认 6，0=关闭）
       --fps <n|off>        抽帧到指定帧率（默认：源高于30自动降到30；off=保持）
@@ -248,8 +251,11 @@ async function main(): Promise<number> {
       }
       const outDir = get("-o", "--output");
       const deleteSource = flag("--delete");
+      const zoomMin = numOf("--zoom-min", 1.02, 1, 1.5);
+      const zoomMax = numOf("--zoom-max", 1.08, 1, 1.5);
+      const mirrorLabel = flag("--no-mirror") ? "镜像关" : flag("--no-ocr") ? "镜像" : `智能镜像(裁剪≤${zoomMax.toFixed(2)})`;
       const applied: string[] = [
-        flag("--no-mirror") ? "镜像关" : "镜像",
+        mirrorLabel,
         `变速${speed === "auto" ? "随机" : speed === "off" ? "关" : speed}`,
         `噪点${numOf("--noise", 6, 0, 60)}`,
         `抽帧${fps === "auto" ? "自动(>30→30)" : fps === "off" ? "关" : fps + "fps"}`,
@@ -263,6 +269,9 @@ async function main(): Promise<number> {
         try {
           const r = await mediaRemix(files[i], {
             mirror: !flag("--no-mirror"),
+            textDetect: !flag("--no-ocr"),
+            zoomMin,
+            zoomMax,
             speed,
             fps,
             noise: numOf("--noise", 6, 0, 60),
@@ -291,9 +300,16 @@ async function main(): Promise<number> {
           });
           const a = r.applied;
           process.stdout.write("\n");
+          const mirrorNote = flag("--no-mirror")
+            ? ""
+            : flag("--no-ocr")
+              ? " · 已镜像(未检测)"
+              : a.textDetected
+                ? ` · 有字→裁剪x${(a.zoom ?? 1).toFixed(2)}未镜像`
+                : " · 无字→已镜像";
           console.log(
             `   ✔ ${(r.sizeBytes / 1048576).toFixed(1)} MB → ${path.basename(r.file)}\n` +
-              `     删帧 ${a.droppedFrames}/${a.windows}窗 · 变速 ${a.speed}x${a.fps ? ` · ${a.fps}fps` : ""} · seed ${a.seed}${r.sourceDeleted ? " · 源已删除" : ""}`,
+              `     删帧 ${a.droppedFrames}/${a.windows}窗 · 变速 ${a.speed}x${a.fps ? ` · ${a.fps}fps` : ""}${mirrorNote} · seed ${a.seed}${r.sourceDeleted ? " · 源已删除" : ""}`,
           );
         } catch (e) {
           process.stdout.write("\n");
@@ -366,7 +382,9 @@ async function main(): Promise<number> {
         : (stage: string) => {
             if (stage === "remix-start") {
               inRemix = true;
-              process.stdout.write("\n🎨 混剪优化中（镜像/抽帧/变速/噪点/随机删帧 + 画质优化，完成后删原片）...\n");
+              process.stdout.write("\n🎨 混剪优化中（智能镜像/抽帧/变速/噪点/随机删帧 + 画质优化，完成后删原片）...\n");
+            } else if (stage === "remix-ocr") {
+              process.stdout.write("\n🔍 抽帧检测画面文字（有字→裁剪替代镜像，首次运行需下载 OCR 数据）...\n");
             } else if (stage === "remix-failed") {
               inRemix = false;
               process.stdout.write("\n⚠ 自动混剪失败（已保留原片）\n");

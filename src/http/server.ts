@@ -73,7 +73,7 @@ footer{font-size:12px;color:#5b6b8c;text-align:center;margin-top:18px;line-heigh
   <div id="meta" class="meta"></div>
   <div id="err" class="err"></div>
   <div id="log" hidden></div>
-  <div class="meta" style="margin-top:10px"><label><input type="checkbox" id="remix" checked style="vertical-align:-2px"> 下载后自动混剪优化（镜像/抽帧/变速/噪点/每10秒随机删帧，只留成品）</label></div>
+  <div class="meta" style="margin-top:10px"><label><input type="checkbox" id="remix" checked style="vertical-align:-2px"> 下载后自动混剪优化（智能镜像·有字自动改裁剪/抽帧/变速/噪点/随机删帧，只留成品）</label></div>
 </div>
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -161,7 +161,7 @@ function startJob(url: string, quality: string | undefined, remix: string | null
     quality: quality && (QUALITIES as string[]).includes(quality) ? quality : undefined,
     remix: remix === "1" ? true : remix === "0" ? false : undefined,
     onStage: (stage) => {
-      if (stage === "remix-start") job.lines.push("🎨 混剪优化中（镜像/抽帧/变速/噪点/随机删帧）…");
+      if (stage === "remix-start") job.lines.push("🎨 混剪优化中（智能镜像/抽帧/变速/噪点/随机删帧）…");
       else if (stage === "remix-done") job.lines.push("✔ 混剪完成，原片已删除，只留成品");
       else if (stage === "remix-failed") job.lines.push("⚠ 混剪失败，已保留原片");
     },

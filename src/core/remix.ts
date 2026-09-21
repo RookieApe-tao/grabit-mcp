@@ -4,13 +4,20 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { resolveFfmpeg, resolveFfprobe } from "./binaries.js";
 import { loadConfig } from "./config.js";
+import { detectOnScreenText } from "./textdetect.js";
 
 const runp = promisify(execFile);
 
 /** 混剪选项：全部可调，默认覆盖计划里的全部动作（镜像/抽帧/变速/加噪点/每10秒随机删1~3帧）+ 轻画质优化 */
 export type RemixOptions = {
-  /** 水平镜像，默认 true */
+  /** 水平镜像，默认 true（开启时先做文字检测，见 textDetect） */
   mirror?: boolean;
+  /** 智能镜像：OCR 抽帧检测画面文字（内嵌字幕/水印），有字则自动跳过镜像、改用随机裁剪放大补偿（默认 true；仅 mirror=true 时生效） */
+  textDetect?: boolean;
+  /** 检测到文字时随机裁剪放大的下限，默认 1.02 */
+  zoomMin?: number;
+  /** 检测到文字时随机裁剪放大的上限，默认 1.08（硬上限 1.5，避免画面被裁得面目全非） */
+  zoomMax?: number;
   /** 变速倍率；"auto"=随机 0.97~1.06（默认）；1 或 "off"=不变速 */
   speed?: number | "auto" | "off";
   /** 噪点强度 0~60，默认 6（可感知但轻）；0=关闭 */
@@ -34,11 +41,16 @@ export type RemixOptions = {
   /** 成功后删除源文件（自动流水线用），默认 false */
   deleteSource?: boolean;
   onLine?: (line: string) => void;
-  onStage?: (stage: "probe" | "encode") => void;
+  onStage?: (stage: "probe" | "ocr" | "encode") => void;
 };
 
 export type RemixApplied = {
+  /** 最终是否执行了镜像（检测到文字时为 false） */
   mirror: boolean;
+  /** 是否检测到画面文字（触发了「跳过镜像改裁剪」） */
+  textDetected: boolean;
+  /** 裁剪放大倍率；null=未裁剪 */
+  zoom: number | null;
   speed: number;
   noise: number;
   /** 输出帧率；null=保持源帧率 */
@@ -171,6 +183,16 @@ function dropExpressionAudio(times: number[], fps: number): string {
     .join("+");
 }
 
+/** 有字时的镜像替代：随机位置裁剪放大 zoom 倍再放回原尺寸（偶数对齐，兼容 yuv420） */
+function cropZoomExpr(zoom: number, w: number, h: number, rng: () => number): string | null {
+  if (!w || !h) return null;
+  const cw = Math.max(16, (Math.floor(w / zoom) & ~1));
+  const ch = Math.max(16, (Math.floor(h / zoom) & ~1));
+  const x = Math.floor(rng() * (w - cw)) & ~1;
+  const y = Math.floor(rng() * (h - ch)) & ~1;
+  return `crop=${cw}:${ch}:${x}:${y},scale=${w}:${h}:flags=lanczos`;
+}
+
 // ---------- 主流程 ----------
 
 export async function mediaRemix(file: string, o: RemixOptions = {}): Promise<RemixResult> {
@@ -188,7 +210,7 @@ export async function mediaRemix(file: string, o: RemixOptions = {}): Promise<Re
   const rng = mulberry32(seed);
 
   // 归一化参数
-  const mirror = o.mirror ?? true;
+  const mirrorWanted = o.mirror ?? true;
   let speed: number;
   if (o.speed === "off") speed = 1;
   else if (o.speed === "auto" || o.speed === undefined) speed = Math.round((0.97 + rng() * 0.09) * 1000) / 1000;
@@ -203,10 +225,32 @@ export async function mediaRemix(file: string, o: RemixOptions = {}): Promise<Re
   else if (o.fps !== "off") targetFps = Math.min(120, Math.max(5, Math.round(o.fps)));
   const enhance = o.enhance ?? true;
 
-  // 滤镜链（视频）：优化 → 镜像 → 随机删帧 → 重建时间戳(含变速) → 抽帧降率 → 加噪点
+  // 智能镜像：画面里有文字就不镜像（翻了字就没法看），改用随机裁剪放大补偿去重效果
+  let mirror = mirrorWanted;
+  let textDetected = false;
+  let zoom: number | null = null;
+  if (mirrorWanted && (o.textDetect ?? true)) {
+    o.onStage?.("ocr");
+    const det = await detectOnScreenText(ffmpeg, file, probe.duration, { onLine: o.onLine });
+    if (det?.found) {
+      textDetected = true;
+      mirror = false;
+      const zmin = Math.min(Math.max(o.zoomMin ?? 1.02, 1), 1.5);
+      const zmax = Math.min(Math.max(o.zoomMax ?? 1.08, zmin), 1.5);
+      zoom = Math.round((zmin + rng() * (zmax - zmin)) * 1000) / 1000;
+      o.onLine?.(`🔍 检测到画面文字「${det.sample}」→ 跳过镜像，改裁剪放大 x${zoom.toFixed(2)}`);
+    }
+  }
+
+  // 滤镜链（视频）：优化 → 镜像/裁剪放大 → 随机删帧 → 重建时间戳(含变速) → 抽帧降率 → 加噪点
   const vf: string[] = [];
   if (enhance) vf.push("hqdn3d=1.5:1.2:6:6", "cas=0.5");
   if (mirror) vf.push("hflip");
+  else if (zoom !== null && zoom > 1.0005) {
+    const expr = cropZoomExpr(zoom, probe.width, probe.height, rng);
+    if (expr) vf.push(expr);
+    else mirror = true; // 拿不到画面尺寸时回退为直接镜像
+  }
 
   const plan = buildDropPlan(probe.duration, probe.fps, windowSec, dropMin, dropMax, rng);
   const hasSelect = plan.times.length > 0;
@@ -310,6 +354,8 @@ export async function mediaRemix(file: string, o: RemixOptions = {}): Promise<Re
     sourceDeleted,
     applied: {
       mirror,
+      textDetected,
+      zoom,
       speed,
       noise,
       fps: targetFps,

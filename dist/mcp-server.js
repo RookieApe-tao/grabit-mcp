@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { doctorText, mediaBatch, mediaDownload, mediaEnhance, mediaInfo, mediaRemix, } from "./core/api.js";
 import { loadConfig, saveConfig } from "./core/config.js";
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 function fail(e) {
     return {
         content: [{ type: "text", text: `✖ ${e instanceof Error ? e.message : String(e)}` }],
@@ -21,7 +21,7 @@ server.tool("media_info", "查询视频信息：标题/时长/UP主/可用画质
         return fail(e);
     }
 });
-server.tool("media_download", "下载视频/音频到本机（默认最高画质、ffmpeg 合并）。视频默认下载后自动「混剪+画质优化」并删除原片只留成品（镜像/抽帧/变速/噪点/每10秒随机删帧），remix=false 可关闭", {
+server.tool("media_download", "下载视频/音频到本机（默认最高画质、ffmpeg 合并）。视频默认下载后自动「混剪+画质优化」并删除原片只留成品（智能镜像：检测到画面文字自动改用裁剪；另有抽帧/变速/噪点/每10秒随机删帧），remix=false 可关闭", {
     url: z.string().describe("视频页面链接"),
     quality: z
         .enum(["best", "2160", "1080", "720", "480", "audio"])
@@ -43,7 +43,7 @@ server.tool("media_download", "下载视频/音频到本机（默认最高画质
         const size = r.sizeBytes ? `（${(r.sizeBytes / 1048576).toFixed(1)} MB）` : "";
         const tag = r.engine === "douyin-api" ? "·无水印" : "";
         const remixNote = r.remixed
-            ? "\n🎨 已自动混剪+优化（镜像/抽帧/变速/噪点/随机删帧），原片已删除"
+            ? "\n🎨 已自动混剪+优化（智能镜像/抽帧/变速/噪点/随机删帧），原片已删除"
             : r.remixError
                 ? `\n⚠ 自动混剪失败（保留原片）: ${r.remixError}`
                 : "";
@@ -117,9 +117,15 @@ server.tool("media_enhance", "本地画质优化：去压缩伪影+锐化后重�
         return fail(e);
     }
 });
-server.tool("media_remix", "本地混剪去重：对已有视频做镜像/抽帧/变速/加噪点/每10秒随机删1~3帧，并顺带轻画质优化，一次编码输出 _混剪优化.mp4（默认保留源文件）", {
+server.tool("media_remix", "本地混剪去重：对已有视频做智能镜像（OCR 检测到画面文字自动改随机裁剪放大）/抽帧/变速/加噪点/每10秒随机删1~3帧，并顺带轻画质优化，一次编码输出 _混剪优化.mp4（默认保留源文件）", {
     file: z.string().describe("视频文件完整路径"),
-    mirror: z.boolean().default(true).describe("水平镜像"),
+    mirror: z.boolean().default(true).describe("水平镜像（开启时默认先做文字检测，见 textDetect）"),
+    textDetect: z
+        .boolean()
+        .default(true)
+        .describe("智能镜像：OCR 抽帧检测画面文字（内嵌字幕/水印），有字则跳过镜像、改随机裁剪放大"),
+    zoomMin: z.number().min(1).max(1.5).default(1.02).describe("检测到文字时随机裁剪放大下限"),
+    zoomMax: z.number().min(1).max(1.5).default(1.08).describe("检测到文字时随机裁剪放大上限"),
     speed: z
         .union([z.number(), z.literal("auto"), z.literal("off")])
         .default("auto")
@@ -135,9 +141,9 @@ server.tool("media_remix", "本地混剪去重：对已有视频做镜像/抽帧
     seed: z.number().optional().describe("随机种子（可复现）"),
     enhance: z.boolean().default(true).describe("顺带轻画质优化（去伪影+锐化）"),
     deleteSource: z.boolean().default(false).describe("成功后删除源文件"),
-}, async ({ file, mirror, speed, noise, fps, dropWindow, dropMin, dropMax, seed, enhance, deleteSource }) => {
+}, async ({ file, mirror, textDetect, zoomMin, zoomMax, speed, noise, fps, dropWindow, dropMin, dropMax, seed, enhance, deleteSource }) => {
     try {
-        const o = { mirror, speed, noise, fps, dropWindow, dropMin, dropMax, seed, enhance, deleteSource };
+        const o = { mirror, textDetect, zoomMin, zoomMax, speed, noise, fps, dropWindow, dropMin, dropMax, seed, enhance, deleteSource };
         const r = await mediaRemix(file, o);
         const a = r.applied;
         return {
@@ -145,7 +151,7 @@ server.tool("media_remix", "本地混剪去重：对已有视频做镜像/抽帧
                 {
                     type: "text",
                     text: `✔ 混剪完成（${(r.sizeBytes / 1048576).toFixed(1)} MB）\n${r.file}\n` +
-                        `镜像:${a.mirror ? "开" : "关"} · 变速:${a.speed}x · 噪点:${a.noise} · ` +
+                        `镜像:${a.mirror ? "开" : a.textDetected ? `关(有字→裁剪x${(a.zoom ?? 1).toFixed(2)})` : "关"} · 变速:${a.speed}x · 噪点:${a.noise} · ` +
                         `删帧:${a.droppedFrames}帧/${a.windows}窗${a.fps ? ` · ${a.fps}fps` : ""} · ` +
                         `优化:${a.enhance ? "开" : "关"} · seed:${a.seed}${r.sourceDeleted ? "\n源文件已删除" : ""}`,
                 },

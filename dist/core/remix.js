@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { resolveFfmpeg, resolveFfprobe } from "./binaries.js";
 import { loadConfig } from "./config.js";
+import { detectOnScreenText } from "./textdetect.js";
 const runp = promisify(execFile);
 // ---------- 随机数（可复现） ----------
 function mulberry32(seed) {
@@ -91,6 +92,16 @@ function dropExpressionAudio(times, fps) {
         .map((t) => `between(t,${t.toFixed(6)},${(t + slot).toFixed(6)})`)
         .join("+");
 }
+/** 有字时的镜像替代：随机位置裁剪放大 zoom 倍再放回原尺寸（偶数对齐，兼容 yuv420） */
+function cropZoomExpr(zoom, w, h, rng) {
+    if (!w || !h)
+        return null;
+    const cw = Math.max(16, (Math.floor(w / zoom) & ~1));
+    const ch = Math.max(16, (Math.floor(h / zoom) & ~1));
+    const x = Math.floor(rng() * (w - cw)) & ~1;
+    const y = Math.floor(rng() * (h - ch)) & ~1;
+    return `crop=${cw}:${ch}:${x}:${y},scale=${w}:${h}:flags=lanczos`;
+}
 // ---------- 主流程 ----------
 export async function mediaRemix(file, o = {}) {
     const cfg = loadConfig();
@@ -106,7 +117,7 @@ export async function mediaRemix(file, o = {}) {
     const seed = o.seed ?? randomSeed();
     const rng = mulberry32(seed);
     // 归一化参数
-    const mirror = o.mirror ?? true;
+    const mirrorWanted = o.mirror ?? true;
     let speed;
     if (o.speed === "off")
         speed = 1;
@@ -125,12 +136,35 @@ export async function mediaRemix(file, o = {}) {
     else if (o.fps !== "off")
         targetFps = Math.min(120, Math.max(5, Math.round(o.fps)));
     const enhance = o.enhance ?? true;
-    // 滤镜链（视频）：优化 → 镜像 → 随机删帧 → 重建时间戳(含变速) → 抽帧降率 → 加噪点
+    // 智能镜像：画面里有文字就不镜像（翻了字就没法看），改用随机裁剪放大补偿去重效果
+    let mirror = mirrorWanted;
+    let textDetected = false;
+    let zoom = null;
+    if (mirrorWanted && (o.textDetect ?? true)) {
+        o.onStage?.("ocr");
+        const det = await detectOnScreenText(ffmpeg, file, probe.duration, { onLine: o.onLine });
+        if (det?.found) {
+            textDetected = true;
+            mirror = false;
+            const zmin = Math.min(Math.max(o.zoomMin ?? 1.02, 1), 1.5);
+            const zmax = Math.min(Math.max(o.zoomMax ?? 1.08, zmin), 1.5);
+            zoom = Math.round((zmin + rng() * (zmax - zmin)) * 1000) / 1000;
+            o.onLine?.(`🔍 检测到画面文字「${det.sample}」→ 跳过镜像，改裁剪放大 x${zoom.toFixed(2)}`);
+        }
+    }
+    // 滤镜链（视频）：优化 → 镜像/裁剪放大 → 随机删帧 → 重建时间戳(含变速) → 抽帧降率 → 加噪点
     const vf = [];
     if (enhance)
         vf.push("hqdn3d=1.5:1.2:6:6", "cas=0.5");
     if (mirror)
         vf.push("hflip");
+    else if (zoom !== null && zoom > 1.0005) {
+        const expr = cropZoomExpr(zoom, probe.width, probe.height, rng);
+        if (expr)
+            vf.push(expr);
+        else
+            mirror = true; // 拿不到画面尺寸时回退为直接镜像
+    }
     const plan = buildDropPlan(probe.duration, probe.fps, windowSec, dropMin, dropMax, rng);
     const hasSelect = plan.times.length > 0;
     const needSetpts = hasSelect || speed !== 1;
@@ -229,6 +263,8 @@ export async function mediaRemix(file, o = {}) {
         sourceDeleted,
         applied: {
             mirror,
+            textDetected,
+            zoom,
             speed,
             noise,
             fps: targetFps,
