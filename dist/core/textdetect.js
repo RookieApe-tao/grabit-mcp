@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { grabitHome } from "./config.js";
+import { rmTreeSync } from "./rmsafe.js";
 const runp = promisify(execFile);
 /** 抽帧 OCR 检测的语言：简体中文 + 英文/数字（fast 变体足够判断"有没有字"） */
 const OCR_LANGS = ["chi_sim", "eng"];
@@ -149,7 +150,7 @@ export async function detectOnScreenText(ffmpeg, file, duration, o = {}) {
             /* 忽略 */
         }
         try {
-            fs.rmSync(tmp, { recursive: true, force: true });
+            rmTreeSync(tmp);
         }
         catch {
             /* 忽略 */

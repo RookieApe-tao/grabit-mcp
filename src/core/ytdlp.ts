@@ -140,6 +140,8 @@ export type DownloadOutcome = {
   file: string | null;
   code: number;
   tail: string[];
+  /** yt-dlp 报告「has already been downloaded」（本次未实际下载） */
+  alreadyDownloaded: boolean;
 };
 
 export async function ytdlpDownload(
@@ -158,5 +160,6 @@ export async function ytdlpDownload(
     const err = stderrLines.filter((l) => l.includes("ERROR")).slice(-3).join("\n");
     throw new Error(err || tail.join("\n") || `yt-dlp 退出码 ${code}`);
   }
-  return { file: extractFinalPath(stdoutLines), code, tail };
+  const alreadyDownloaded = stdoutLines.some((l) => /has already been downloaded/i.test(l));
+  return { file: extractFinalPath(stdoutLines), code, tail, alreadyDownloaded };
 }

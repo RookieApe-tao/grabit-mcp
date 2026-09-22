@@ -6,7 +6,7 @@ import { configFile, loadConfig } from "./config.js";
 import { douyinDownload } from "./douyin.js";
 import { detectPlatform, PLATFORM_LABEL } from "./router.js";
 import { normalizeQuality } from "./args.js";
-import { mediaRemix } from "./remix.js";
+import { isRemixOutput, mediaRemix } from "./remix.js";
 import { newestFileSince, ytdlpDownload, ytdlpInfo } from "./ytdlp.js";
 export { detectPlatform, PLATFORM_LABEL } from "./router.js";
 export { doctor } from "./binaries.js";
@@ -39,7 +39,12 @@ export async function mediaInfo(url) {
 /** 下载收尾：按开关对成品做「混剪+优化」一次编码，成功即删源，只留最终文件 */
 async function finalizeDownload(base, file, o, cfg) {
     let sizeBytes = fs.existsSync(file) ? fs.statSync(file).size : 0;
-    const wantRemix = (o.remix ?? cfg.autoRemix ?? true) && base.quality !== "audio" && !!file && fs.existsSync(file);
+    // 已是混剪成品的文件不再二次混剪（避免成品套娃重编码，体积翻倍画质反降）
+    const wantRemix = (o.remix ?? cfg.autoRemix ?? true) &&
+        base.quality !== "audio" &&
+        !!file &&
+        fs.existsSync(file) &&
+        !isRemixOutput(path.basename(file));
     if (!wantRemix)
         return { ...base, file, sizeBytes };
     o.onStage?.("remix-start", file);
@@ -105,7 +110,14 @@ export async function mediaDownload(url, o = {}) {
     }
     // print 路径可能乱码（PyInstaller 编码问题）：有效就用，否则扫描输出目录取最新成品
     const printed = result.file;
-    const file = printed && fs.existsSync(printed) ? printed : (newestFileSince(outputDir, startedAt) ?? "");
+    let file = printed && fs.existsSync(printed) ? printed : (newestFileSince(outputDir, startedAt) ?? "");
+    if (!file && result.alreadyDownloaded) {
+        // yt-dlp 报告「已下载过」：窗口内没有新文件，放宽到 7 天内最近成品
+        // （含此前生成的混剪成品）——拿到现有文件总比空着退出 1 好
+        const wide = newestFileSince(outputDir, Date.now() - 7 * 24 * 3600 * 1000);
+        if (wide)
+            file = wide;
+    }
     return finalizeDownload({ platform, platformLabel: PLATFORM_LABEL[platform], quality, engine: "yt-dlp" }, file, o, cfg);
 }
 export async function mediaBatch(urls, o = {}, onItem) {

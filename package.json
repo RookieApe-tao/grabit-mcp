@@ -1,6 +1,6 @@
 {
   "name": "grabit-mcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "grabit — 全平台高清视频下载器：CLI + MCP server + 手机网页。YouTube / X / Telegram / 抖音 / B站，最高画质、无水印；下载后可自动混剪优化（智能镜像·有字自动改裁剪/抽帧/变速/噪点/随机删帧）",
   "type": "module",
   "license": "MIT",

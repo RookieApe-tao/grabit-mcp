@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { GrabitConfig } from "./config.js";
+import { rmFileSync, rmTreeSync } from "./rmsafe.js";
 
 const runp = promisify(execFile);
 
@@ -165,7 +166,7 @@ export async function installBinaries(cfg: GrabitConfig): Promise<void> {
 
     console.log("… 解压 ffmpeg ...");
     const exDir = path.join(cfg.binDir, "ffmpeg-extract");
-    fs.rmSync(exDir, { recursive: true, force: true });
+    rmTreeSync(exDir);
     try {
       await runp("tar", ["-xf", zip, "-C", exDir], { timeout: 300_000 });
     } catch {
@@ -180,8 +181,8 @@ export async function installBinaries(cfg: GrabitConfig): Promise<void> {
       if (!found) throw new Error(`解压包中未找到 ${exe}`);
       fs.copyFileSync(found, path.join(cfg.binDir, exe));
     }
-    fs.rmSync(exDir, { recursive: true, force: true });
-    fs.rmSync(zip, { force: true });
+    rmTreeSync(exDir);
+    rmFileSync(zip);
     console.log("✔ ffmpeg 安装完成");
   }
 }

@@ -248,12 +248,38 @@ export async function mediaRemix(file, o = {}) {
     }
     let sourceDeleted = false;
     if (o.deleteSource) {
+        // 用 unlinkSync 而不是 rmSync({force:true})：后者在 node v24 + Windows 上
+        // 对部分 Unicode 路径会原生 fail-fast（0xC0000409，不可捕获），进程静默暴毙
+        // ——表现为成品已生成但无完成提示、原片残留、退出码异常。
         try {
-            fs.rmSync(file, { force: true });
+            fs.unlinkSync(file);
             sourceDeleted = true;
         }
-        catch {
-            sourceDeleted = false;
+        catch (err) {
+            const code = err?.code;
+            if (code === "ENOENT") {
+                sourceDeleted = true; // 已不在 = 目标达成
+            }
+            else if (code === "EBUSY" || code === "EPERM" || code === "EACCES") {
+                // 被杀软扫描/残留句柄短暂占用：小退避重试两次，仍失败则如实保留原片
+                for (let i = 0; i < 2; i++) {
+                    await new Promise((r) => setTimeout(r, 300));
+                    try {
+                        fs.unlinkSync(file);
+                        sourceDeleted = true;
+                        break;
+                    }
+                    catch (e2) {
+                        const c2 = e2?.code;
+                        if (c2 === "ENOENT") {
+                            sourceDeleted = true;
+                            break;
+                        }
+                        if (c2 !== "EBUSY" && c2 !== "EPERM" && c2 !== "EACCES")
+                            break;
+                    }
+                }
+            }
         }
     }
     return {

@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { grabitHome } from "./config.js";
+import { rmTreeSync } from "./rmsafe.js";
 
 const runp = promisify(execFile);
 
@@ -163,7 +164,7 @@ export async function detectOnScreenText(
       /* 忽略 */
     }
     try {
-      fs.rmSync(tmp, { recursive: true, force: true });
+      rmTreeSync(tmp);
     } catch {
       /* 忽略 */
     }

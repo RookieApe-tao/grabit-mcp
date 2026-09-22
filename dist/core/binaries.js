@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { rmFileSync, rmTreeSync } from "./rmsafe.js";
 const runp = promisify(execFile);
 async function which(bin) {
     try {
@@ -156,7 +157,7 @@ export async function installBinaries(cfg) {
             throw new Error("ffmpeg 下载失败，请手动下载后放入 " + cfg.binDir);
         console.log("… 解压 ffmpeg ...");
         const exDir = path.join(cfg.binDir, "ffmpeg-extract");
-        fs.rmSync(exDir, { recursive: true, force: true });
+        rmTreeSync(exDir);
         try {
             await runp("tar", ["-xf", zip, "-C", exDir], { timeout: 300_000 });
         }
@@ -169,8 +170,8 @@ export async function installBinaries(cfg) {
                 throw new Error(`解压包中未找到 ${exe}`);
             fs.copyFileSync(found, path.join(cfg.binDir, exe));
         }
-        fs.rmSync(exDir, { recursive: true, force: true });
-        fs.rmSync(zip, { force: true });
+        rmTreeSync(exDir);
+        rmFileSync(zip);
         console.log("✔ ffmpeg 安装完成");
     }
 }
