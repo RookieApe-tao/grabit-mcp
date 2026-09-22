@@ -13,7 +13,7 @@ import {
 } from "./core/api.js";
 import { loadConfig, saveConfig } from "./core/config.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 
 function fail(e: unknown) {
   return {

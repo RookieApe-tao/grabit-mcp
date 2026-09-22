@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { doctorText, mediaBatch, mediaDownload, mediaEnhance, mediaInfo, mediaRemix, } from "./core/api.js";
 import { loadConfig, saveConfig } from "./core/config.js";
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 function fail(e) {
     return {
         content: [{ type: "text", text: `✖ ${e instanceof Error ? e.message : String(e)}` }],
